@@ -1,0 +1,14 @@
+[Unit]
+Description=Tally Sync Service
+After=network.target
+
+[Service]
+Type=simple
+User=achiket
+WorkingDirectory=/home/achiket/Documents/work/onlyoncloud/tally-cat/TallySyncService/bin/Release/net8.0/win-x64/publish
+ExecStart=wine /home/achiket/Documents/work/onlyoncloud/tally-cat/TallySyncService/bin/Release/net8.0/win-x64/publish/TallySyncService.exe
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
