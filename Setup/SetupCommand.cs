@@ -24,7 +24,7 @@ public class SetupCommand
         try
         {
             Console.WriteLine("╔════════════════════════════════════════════╗");
-            Console.WriteLine("║   Tally Sync Service - Initial Setup       ║");
+            Console.WriteLine("║   Tally Sync Service - Initial Setup      ║");
             Console.WriteLine("╚════════════════════════════════════════════╝");
             Console.WriteLine();
 
@@ -35,7 +35,7 @@ public class SetupCommand
             if (!isConnected)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("X Cannot connect to Tally Prime!");
+                Console.WriteLine("✗ Cannot connect to Tally Prime!");
                 Console.ResetColor();
                 Console.WriteLine("Please ensure:");
                 Console.WriteLine("  1. Tally Prime is running");
@@ -47,6 +47,48 @@ public class SetupCommand
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("✓ Successfully connected to Tally!");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // Get and select company
+            Console.WriteLine("Fetching companies from Tally...");
+            var companies = await _tallyService.GetCompanyListAsync();
+            
+            if (companies.Count == 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("✗ No companies found in Tally!");
+                Console.ResetColor();
+                return 1;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Available companies:");
+            Console.WriteLine("─────────────────────────────────────────────");
+            
+            for (int i = 0; i < companies.Count; i++)
+            {
+                Console.WriteLine($"{i + 1,2}. {companies[i].Name}");
+            }
+            
+            Console.WriteLine();
+            Console.Write("Select company number: ");
+            var companyInput = Console.ReadLine()?.Trim();
+            
+            if (string.IsNullOrEmpty(companyInput) || 
+                !int.TryParse(companyInput, out int companyIndex) || 
+                companyIndex < 1 || 
+                companyIndex > companies.Count)
+            {
+                Console.WriteLine("Invalid selection. Setup cancelled.");
+                return 1;
+            }
+
+            var selectedCompany = companies[companyIndex - 1];
+            _tallyService.SetActiveCompany(selectedCompany.Name);
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"✓ Selected company: {selectedCompany.Name}");
             Console.ResetColor();
             Console.WriteLine();
 
@@ -107,6 +149,7 @@ public class SetupCommand
             }
 
             Console.WriteLine();
+            Console.WriteLine($"Company: {selectedCompany.Name}");
             Console.WriteLine("You have selected the following tables:");
             foreach (var table in selectedTables)
             {
@@ -128,6 +171,7 @@ public class SetupCommand
             var config = new SyncConfiguration
             {
                 SelectedTables = selectedTables,
+                SelectedCompany = selectedCompany.Name,
                 IsConfigured = true,
                 LastConfigUpdate = DateTime.UtcNow
             };
@@ -148,6 +192,7 @@ public class SetupCommand
             Console.WriteLine("✓ Configuration saved successfully!");
             Console.ResetColor();
             Console.WriteLine();
+            Console.WriteLine($"Company: {selectedCompany.Name}");
             Console.WriteLine($"Configuration saved to: {_configService.GetDataDirectory()}");
             Console.WriteLine();
             Console.WriteLine("You can now run the service. The sync will start automatically.");

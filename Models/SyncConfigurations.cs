@@ -7,6 +7,7 @@ public class SyncConfiguration
     public DateTime? LastConfigUpdate { get; set; }
     public bool IsConfigured { get; set; }
     public bool IsInitialSyncComplete { get; set; }
+    public string? SelectedCompany { get; set; }
 }
 
 public class TableSyncState
@@ -29,9 +30,16 @@ public class TallyTable
     public string CollectionType { get; set; } = string.Empty;
 }
 
+public class TallyCompany
+{
+    public string Name { get; set; } = string.Empty;
+    public string GUID { get; set; } = string.Empty;
+}
+
 public class SyncPayload
 {
     public string TableName { get; set; } = string.Empty;
+    public string? CompanyName { get; set; }
     public List<SyncRecord> Records { get; set; } = new();
     public DateTime Timestamp { get; set; }
     public string? SourceIdentifier { get; set; }
@@ -62,5 +70,6 @@ public class TallySyncOptions
     public int MaxRetryAttempts { get; set; } = 3;
     public string? DataDirectory { get; set; }
     public int ChunkSize { get; set; } = 100; // Records per chunk
+    public bool RequireAuthentication { get; set; } = true;
     public int InitialSyncDaysBack { get; set; } = 365; // For initial sync, how far back to go
 }

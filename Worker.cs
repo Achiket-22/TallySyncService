@@ -11,6 +11,7 @@ public class Worker : BackgroundService
     private readonly IBackendService _backendService;
     private readonly IConfigurationService _configService;
     private readonly ISyncEngine _syncEngine;
+    private readonly IAuthService _authService;
     private readonly TallySyncOptions _options;
     private readonly SemaphoreSlim _syncLock = new(1, 1);
 
@@ -20,6 +21,7 @@ public class Worker : BackgroundService
         IBackendService backendService,
         IConfigurationService configService,
         ISyncEngine syncEngine,
+        IAuthService authService,
         IOptions<TallySyncOptions> options)
     {
         _logger = logger;
@@ -27,6 +29,7 @@ public class Worker : BackgroundService
         _backendService = backendService;
         _configService = configService;
         _syncEngine = syncEngine;
+        _authService = authService;
         _options = options.Value;
     }
 
@@ -34,8 +37,38 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("Tally Sync Service started at: {Time}", DateTimeOffset.Now);
 
-        // Check if service is configured
+        // Load configuration first to get company
         var config = await _configService.LoadConfigurationAsync();
+        
+        // Set active company in Tally service
+        if (!string.IsNullOrEmpty(config.SelectedCompany))
+        {
+            _tallyService.SetActiveCompany(config.SelectedCompany);
+            _logger.LogInformation("Active company: {Company}", config.SelectedCompany);
+        }
+
+        // Check authentication if required
+        if (_options.RequireAuthentication)
+        {
+            if (!_authService.IsAuthenticated())
+            {
+                _logger.LogWarning("Authentication required. Please run 'dotnet run -- --login' to authenticate.");
+                _logger.LogWarning("Service will check for authentication every 5 minutes...");
+                
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+                    
+                    if (_authService.IsAuthenticated())
+                    {
+                        _logger.LogInformation("Authentication detected. Starting sync process...");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Check if service is configured
         if (!config.IsConfigured || config.SelectedTables.Count == 0)
         {
             _logger.LogWarning("Service is not configured. Please run the service with --setup to configure tables.");
@@ -49,6 +82,11 @@ public class Worker : BackgroundService
                 if (config.IsConfigured && config.SelectedTables.Count > 0)
                 {
                     _logger.LogInformation("Configuration detected. Starting sync process...");
+                    // Set active company after configuration loaded
+                    if (!string.IsNullOrEmpty(config.SelectedCompany))
+                    {
+                        _tallyService.SetActiveCompany(config.SelectedCompany);
+                    }
                     break;
                 }
             }
@@ -59,6 +97,14 @@ public class Worker : BackgroundService
         {
             try
             {
+                // Re-check authentication before each sync
+                if (_options.RequireAuthentication && !_authService.IsAuthenticated())
+                {
+                    _logger.LogWarning("Authentication expired. Please re-authenticate.");
+                    await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+                    continue;
+                }
+
                 await PerformSyncAsync(stoppingToken);
             }
             catch (Exception ex)

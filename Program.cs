@@ -46,6 +46,13 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
+    // Check for login mode
+    if (args.Contains("--login"))
+    {
+        await RunLoginModeAsync();
+        return 0;
+    }
+
     // Check for setup mode
     if (args.Contains("--setup") || args.Contains("--configure"))
     {
@@ -67,6 +74,11 @@ try
         return 0;
     }
 
+    if (args.Contains("--test-companies"))
+{
+    await TestCompanyListAsync();
+    return 0;
+}
     // Run as service
     await RunServiceModeAsync();
     return 0;
@@ -94,6 +106,21 @@ async Task RunSetupModeAsync()
     var exitCode = await setupCommand.RunAsync();
     
     Environment.Exit(exitCode);
+}
+
+async Task RunLoginModeAsync()
+{
+    Log.Information("Running in login mode");
+    
+    var builder = Host.CreateApplicationBuilder(args);
+    ConfigureServices(builder);
+    
+    var host = builder.Build();
+    
+    var authService = host.Services.GetRequiredService<IAuthService>();
+    var success = await authService.LoginAsync();
+    
+    Environment.Exit(success ? 0 : 1);
 }
 
 async Task ShowStatusAsync()
@@ -220,75 +247,75 @@ async Task RunTestSyncAsync()
     var testTable = config.SelectedTables.First();
     Console.WriteLine($"3. Testing sync for table: {testTable}");
     
-     try
+    try
+{
+    // Fetch from Tally
+    Console.WriteLine($"   Fetching data from Tally...");
+    var data = await tallyService.FetchTableDataAsync(testTable);
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"   ✓ Fetched {data.Length} bytes from Tally");
+    Console.ResetColor();
+    Console.WriteLine();
+    
+    // Convert to JSON
+    var converter = host.Services.GetRequiredService<IXmlToJsonConverter>();
+    var records = converter.ConvertTallyXmlToRecords(data, testTable);
+    
+    Console.WriteLine($"   ✓ Converted to {records.Count} JSON records");
+    Console.WriteLine();
+    
+    // Show sample of data
+    if (records.Count > 0)
     {
-        // Fetch from Tally
-        Console.WriteLine($"   Fetching data from Tally...");
-        var data = await tallyService.FetchTableDataAsync(testTable);
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"   ✓ Fetched {data.Length} bytes from Tally");
-        Console.ResetColor();
-        Console.WriteLine();
-        
-        // Convert to JSON
-        var converter = host.Services.GetRequiredService<IXmlToJsonConverter>();
-        var records = converter.ConvertTallyXmlToRecords(data, testTable);
-        
-        Console.WriteLine($"   ✓ Converted to {records.Count} JSON records");
-        Console.WriteLine();
-        
-        // Show sample of data
-        if (records.Count > 0)
+        Console.WriteLine("   Sample record (first record):");
+        Console.WriteLine("   " + new string('─', 50));
+        var sampleJson = Newtonsoft.Json.JsonConvert.SerializeObject(records[0].Data, Newtonsoft.Json.Formatting.Indented);
+        var lines = sampleJson.Split('\n');
+        foreach (var line in lines.Take(20))
         {
-            Console.WriteLine("   Sample record (first record):");
-            Console.WriteLine("   " + new string('─', 50));
-            var sampleJson = Newtonsoft.Json.JsonConvert.SerializeObject(records[0].Data, Newtonsoft.Json.Formatting.Indented);
-            var lines = sampleJson.Split('\n');
-            foreach (var line in lines.Take(20))
-            {
-                Console.WriteLine("   " + line);
-            }
-            if (lines.Length > 20)
-                Console.WriteLine("   ... (truncated)");
-            Console.WriteLine("   " + new string('─', 50));
-            Console.WriteLine();
+            Console.WriteLine("   " + line);
         }
-        
-        if (backendConnected)
+        if (lines.Length > 20)
+            Console.WriteLine("   ... (truncated)");
+        Console.WriteLine("   " + new string('─', 50));
+        Console.WriteLine();
+    }
+    
+    if (backendConnected)
+    {
+        // Send to backend
+        Console.WriteLine($"   Sending data to backend...");
+        var payload = new SyncPayload
         {
-            // Send to backend
-            Console.WriteLine($"   Sending data to backend...");
-            var payload = new SyncPayload
-            {
-                TableName = testTable,
-                Records = records.Take(5).ToList(), // Send only first 5 for testing
-                Timestamp = DateTime.UtcNow,
-                SourceIdentifier = Environment.MachineName,
-                TotalRecords = records.Count,
-                ChunkNumber = 1,
-                TotalChunks = 1,
-                SyncMode = "TEST"
-            };
-            
-            var success = await backendService.SendDataAsync(payload);
-            if (success)
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"   ✓ Successfully sent test data to backend");
-                Console.ResetColor();
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"   ✗ Failed to send data to backend");
-                Console.ResetColor();
-            }
+            TableName = testTable,
+            Records = records.Take(5).ToList(), // Send only first 5 for testing
+            Timestamp = DateTime.UtcNow,
+            SourceIdentifier = Environment.MachineName,
+            TotalRecords = records.Count,
+            ChunkNumber = 1,
+            TotalChunks = 1,
+            SyncMode = "TEST"
+        };
+        
+        var success = await backendService.SendDataAsync(payload);
+        if (success)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"   ✓ Successfully sent test data to backend");
+            Console.ResetColor();
         }
         else
         {
-            Console.WriteLine($"   Skipping backend send (connection failed)");
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"   ✗ Failed to send data to backend");
+            Console.ResetColor();
         }
     }
+    else
+    {
+        Console.WriteLine($"   Skipping backend send (connection failed)");
+    }
+}
     catch (Exception ex)
     {
         Console.ForegroundColor = ConsoleColor.Red;
@@ -331,9 +358,17 @@ void ConfigureServices(HostApplicationBuilder builder)
         builder.Configuration.GetSection("TallySync"));
 
     // Register services
-    builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
+    builder.Services.AddSingleton<ConfigurationService>();
+    builder.Services.AddSingleton<IConfigurationService>(sp => sp.GetRequiredService<ConfigurationService>());
     builder.Services.AddSingleton<ITallyService, TallyService>();
-    builder.Services.AddSingleton<IBackendService, BackendService>();
+    builder.Services.AddSingleton<IAuthService, AuthService>();
+    builder.Services.AddSingleton<IBackendService>(sp =>
+    {
+        var backendService = ActivatorUtilities.CreateInstance<BackendService>(sp);
+        var authService = sp.GetRequiredService<IAuthService>();
+        backendService.SetAuthService(authService);
+        return backendService;
+    });
     builder.Services.AddSingleton<IXmlToJsonConverter, XmlToJsonConverter>();
     builder.Services.AddSingleton<ISyncEngine, SyncEngine>();
     builder.Services.AddTransient<SetupCommand>();
@@ -352,17 +387,9 @@ void ConfigureServices(HostApplicationBuilder builder)
     builder.Services.AddHttpClient("BackendClient", (serviceProvider, client) =>
     {
         var options = serviceProvider.GetRequiredService<IOptions<TallySyncOptions>>().Value;
-        var configuration = serviceProvider.GetRequiredService<IConfiguration>();
         
         client.BaseAddress = new Uri(options.BackendUrl);
         client.Timeout = TimeSpan.FromSeconds(options.BackendTimeoutSeconds);
-        
-        // Add API key if configured (from User Secrets)
-        var apiKey = configuration["TallySync:ApiKey"];
-        if (!string.IsNullOrEmpty(apiKey))
-        {
-            client.DefaultRequestHeaders.Add("X-API-Key", apiKey);
-        }
     })
     .AddPolicyHandler(GetRetryPolicy())
     .AddPolicyHandler(GetCircuitBreakerPolicy());
@@ -398,3 +425,55 @@ IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
                 Log.Information("Circuit breaker reset");
             });
 }
+
+async Task TestCompanyListAsync()
+{
+    var builder = Host.CreateApplicationBuilder(args);
+    ConfigureServices(builder);
+    var host = builder.Build();
+    
+    var tallyService = host.Services.GetRequiredService<ITallyService>();
+    
+    Console.WriteLine("Testing Tally Company List...");
+    
+    // Make raw HTTP request to see what Tally returns
+    var client = new HttpClient();
+    client.BaseAddress = new Uri("http://localhost:9000");
+    
+    var xmlPayload = @"<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>ListOfCompanies</ID>
+  </HEADER>
+
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME='ListOfCompanies'>
+            <TYPE>Company</TYPE>
+            <FETCH>NAME</FETCH>
+          </COLLECTION>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>";
+
+    var content = new StringContent(xmlPayload, System.Text.Encoding.UTF8, "text/xml");
+    var response = await client.PostAsync("", content);
+    
+    var xmlData = await response.Content.ReadAsStringAsync();
+    
+    // Save to file to inspect
+    await File.WriteAllTextAsync("company-list-response.xml", xmlData);
+    Console.WriteLine("Response saved to company-list-response.xml");
+    Console.WriteLine(xmlData);
+}
+

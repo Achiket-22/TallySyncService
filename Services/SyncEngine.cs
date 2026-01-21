@@ -1,4 +1,3 @@
-
 using Microsoft.Extensions.Options;
 using TallySyncService.Models;
 
@@ -56,65 +55,85 @@ public class SyncEngine : ISyncEngine
         }
     }
 
-    private async Task<bool> PerformInitialSyncAsync(string tableName, TableSyncState state, CancellationToken cancellationToken)
+   private async Task<bool> PerformInitialSyncAsync(string tableName, TableSyncState state, CancellationToken cancellationToken)
+{
+    try
     {
-        try
+        var toDate = DateTime.Now;
+        var fromDate = toDate.AddDays(-_options.InitialSyncDaysBack);
+
+        // Break into smaller chunks for large datasets
+        var isTransactionalTable = tableName == "Vouchers";
+        var chunkDays = isTransactionalTable ? 30 : 365; // 30 days for vouchers, 365 for masters
+        
+        var allRecords = new List<SyncRecord>();
+        var currentFrom = fromDate;
+
+        while (currentFrom < toDate)
         {
-            // For initial sync, fetch all data going back InitialSyncDaysBack days
-            var toDate = DateTime.Now;
-            var fromDate = toDate.AddDays(-_options.InitialSyncDaysBack);
+            var currentTo = currentFrom.AddDays(chunkDays);
+            if (currentTo > toDate) currentTo = toDate;
 
-            _logger.LogInformation("Initial sync from {From} to {To} for table: {TableName}", 
-                fromDate.ToString("yyyy-MM-dd"), toDate.ToString("yyyy-MM-dd"), tableName);
+            _logger.LogInformation("Fetching chunk from {From} to {To} for table: {TableName}", 
+                currentFrom.ToString("yyyy-MM-dd"), currentTo.ToString("yyyy-MM-dd"), tableName);
 
-            // Fetch all data
-            var xmlData = await _tallyService.FetchTableDataAsync(tableName, fromDate, toDate);
+            // Fetch data for this chunk
+            var xmlData = await _tallyService.FetchTableDataAsync(tableName, currentFrom, currentTo);
 
-            if (string.IsNullOrEmpty(xmlData))
+            if (!string.IsNullOrEmpty(xmlData))
             {
-                _logger.LogWarning("No data returned from Tally for table: {TableName}", tableName);
-                state.InitialSyncComplete = true;
-                return true;
+                var records = _converter.ConvertTallyXmlToRecords(xmlData, tableName);
+                _logger.LogInformation("Fetched {Count} records for chunk", records.Count);
+                allRecords.AddRange(records);
             }
 
-            // Convert XML to JSON records
-            var records = _converter.ConvertTallyXmlToRecords(xmlData, tableName);
-            _logger.LogInformation("Converted {Count} records for table: {TableName}", records.Count, tableName);
-
-            if (records.Count == 0)
-            {
-                _logger.LogInformation("No records found for table: {TableName}", tableName);
-                state.InitialSyncComplete = true;
-                return true;
-            }
-
-            // Store hashes for future change detection
-            foreach (var record in records)
-            {
-                state.RecordHashes[record.Id] = record.Hash;
-            }
-
-            // Send in chunks
-            var success = await SendRecordsInChunksAsync(tableName, records, "FULL", cancellationToken);
-
-            if (success)
-            {
-                state.InitialSyncComplete = true;
-                state.LastSyncTime = DateTime.UtcNow;
-                state.TotalRecordsSynced = records.Count;
-                _logger.LogInformation("Initial sync completed for table: {TableName}. Records: {Count}", 
-                    tableName, records.Count);
-            }
-
-            return success;
+            currentFrom = currentTo.AddDays(1);
+            
+            // Small delay between chunks
+            await Task.Delay(500, cancellationToken);
         }
-        catch (Exception ex)
+
+        _logger.LogInformation("Total records fetched for {TableName}: {Count}", tableName, allRecords.Count);
+
+        if (allRecords.Count == 0)
         {
-            _logger.LogError(ex, "Error during initial sync for table: {TableName}", tableName);
-            return false;
+            _logger.LogInformation("No records found for table: {TableName}", tableName);
+            state.InitialSyncComplete = true;
+            return true;
         }
+
+        // Deduplicate records (in case of overlaps)
+        var uniqueRecords = allRecords
+            .GroupBy(r => r.Id)
+            .Select(g => g.First())
+            .ToList();
+
+        // Store hashes
+        foreach (var record in uniqueRecords)
+        {
+            state.RecordHashes[record.Id] = record.Hash;
+        }
+
+        // Send in chunks
+        var success = await SendRecordsInChunksAsync(tableName, uniqueRecords, "FULL", cancellationToken);
+
+        if (success)
+        {
+            state.InitialSyncComplete = true;
+            state.LastSyncTime = DateTime.UtcNow;
+            state.TotalRecordsSynced = uniqueRecords.Count;
+            _logger.LogInformation("Initial sync completed for table: {TableName}. Records: {Count}", 
+                tableName, uniqueRecords.Count);
+        }
+
+        return success;
     }
-
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Error during initial sync for table: {TableName}", tableName);
+        return false;
+    }
+}
     private async Task<bool> PerformIncrementalSyncAsync(string tableName, TableSyncState state, CancellationToken cancellationToken)
     {
         try
@@ -246,6 +265,7 @@ public class SyncEngine : ISyncEngine
     {
         var chunks = ChunkRecords(records, _options.ChunkSize);
         var totalChunks = chunks.Count;
+        var companyName = _tallyService.GetActiveCompany();
 
         _logger.LogInformation("Sending {Total} records in {Chunks} chunks for table: {TableName}", 
             records.Count, totalChunks, tableName);
@@ -268,7 +288,8 @@ public class SyncEngine : ISyncEngine
                 TotalRecords = records.Count,
                 ChunkNumber = i + 1,
                 TotalChunks = totalChunks,
-                SyncMode = syncMode
+                SyncMode = syncMode,
+                CompanyName = companyName
             };
 
             var success = await _backendService.SendDataAsync(payload);

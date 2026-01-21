@@ -8,6 +8,7 @@ public interface IBackendService
 {
     Task<bool> SendDataAsync(SyncPayload payload);
     Task<bool> CheckConnectionAsync();
+    void SetAuthService(IAuthService authService);
 }
 
 public class BackendService : IBackendService
@@ -15,6 +16,7 @@ public class BackendService : IBackendService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<BackendService> _logger;
     private readonly TallySyncOptions _options;
+    private IAuthService? _authService;
 
     public BackendService(
         IHttpClientFactory httpClientFactory, 
@@ -26,11 +28,19 @@ public class BackendService : IBackendService
         _options = options.Value;
     }
 
+    public void SetAuthService(IAuthService authService)
+    {
+        _authService = authService;
+    }
+
     public async Task<bool> CheckConnectionAsync()
     {
         try
         {
             var client = _httpClientFactory.CreateClient("BackendClient");
+            
+            // Add JWT token if authenticated
+            await AddAuthHeaderAsync(client);
             
             _logger.LogInformation("Checking backend connection at: {Url}{Endpoint}", 
                 _options.BackendUrl, _options.BackendHealthEndpoint);
@@ -66,6 +76,9 @@ public class BackendService : IBackendService
         try
         {
             var client = _httpClientFactory.CreateClient("BackendClient");
+            
+            // Add JWT token if authenticated
+            await AddAuthHeaderAsync(client);
             
             _logger.LogInformation(
                 "Sending data to backend: {Url}{Endpoint} | Table: {TableName} | Records: {RecordCount} | Chunk: {Chunk}/{Total} | Mode: {Mode}", 
@@ -106,6 +119,24 @@ public class BackendService : IBackendService
         {
             _logger.LogError(ex, "Error sending data to backend for table: {TableName}", payload.TableName);
             return false;
+        }
+    }
+
+    private async Task AddAuthHeaderAsync(HttpClient client)
+    {
+        if (_options.RequireAuthentication && _authService != null)
+        {
+            var token = await _authService.GetValidTokenAsync();
+            if (!string.IsNullOrEmpty(token))
+            {
+                client.DefaultRequestHeaders.Authorization = 
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                _logger.LogDebug("Added JWT token to request");
+            }
+            else
+            {
+                _logger.LogWarning("No valid authentication token available");
+            }
         }
     }
 }
