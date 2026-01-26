@@ -47,6 +47,28 @@ public class BackendUploadService
             var jsonContent = JsonSerializer.Serialize(uploadRequest);
             var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
+            // Add JWT token to headers if available (without "Bearer" prefix)
+            var token = AuthService.LoadToken();
+            if (!string.IsNullOrEmpty(token))
+            {
+                if (_httpClient.DefaultRequestHeaders.Contains("Authorization"))
+                {
+                    _httpClient.DefaultRequestHeaders.Remove("Authorization");
+                }
+                _httpClient.DefaultRequestHeaders.Add("Authorization", token);
+            }
+
+            // Add organization ID header if available
+            var orgId = AuthService.LoadOrganisationId();
+            if (orgId.HasValue)
+            {
+                if (_httpClient.DefaultRequestHeaders.Contains("orgid"))
+                {
+                    _httpClient.DefaultRequestHeaders.Remove("orgid");
+                }
+                _httpClient.DefaultRequestHeaders.Add("orgid", orgId.Value.ToString());
+            }
+
             // Send to backend
             var response = await _httpClient.PostAsync(_backendUrl, content);
             
