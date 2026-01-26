@@ -47,14 +47,13 @@ public class BackendUploadService
             var jsonContent = JsonSerializer.Serialize(uploadRequest);
             var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
+            // Clear all default headers to prevent pollution from previous requests
+            _httpClient.DefaultRequestHeaders.Clear();
+
             // Add JWT token to headers if available (without "Bearer" prefix)
             var token = AuthService.LoadToken();
             if (!string.IsNullOrEmpty(token))
             {
-                if (_httpClient.DefaultRequestHeaders.Contains("Authorization"))
-                {
-                    _httpClient.DefaultRequestHeaders.Remove("Authorization");
-                }
                 _httpClient.DefaultRequestHeaders.Add("Authorization", token);
             }
 
@@ -62,10 +61,6 @@ public class BackendUploadService
             var orgId = AuthService.LoadOrganisationId();
             if (orgId.HasValue)
             {
-                if (_httpClient.DefaultRequestHeaders.Contains("orgid"))
-                {
-                    _httpClient.DefaultRequestHeaders.Remove("orgid");
-                }
                 _httpClient.DefaultRequestHeaders.Add("orgid", orgId.Value.ToString());
             }
 

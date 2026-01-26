@@ -25,7 +25,12 @@ public class LoginResponse
 
 public class UserOrganisation
 {
+    [System.Text.Json.Serialization.JsonPropertyName("user_id")]
     public uint UserId { get; set; }
+    
+    [System.Text.Json.Serialization.JsonPropertyName("organisation_id")]
     public uint OrganisationId { get; set; }
+    
+    [System.Text.Json.Serialization.JsonPropertyName("OrganisationCode")]
     public string OrganisationCode { get; set; } = string.Empty;
 }

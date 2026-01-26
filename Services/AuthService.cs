@@ -144,6 +144,8 @@ public class AuthService
             if (response.IsSuccessStatusCode)
             {
                 var responseText = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"DEBUG: Response from /users/orgs: {responseText}");
+                
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                 var orgs = JsonSerializer.Deserialize<List<UserOrganisation>>(responseText, options);
                 return orgs;
