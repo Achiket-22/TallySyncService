@@ -2,7 +2,7 @@ namespace TallySyncService.Models;
 
 public class AuthConfig
 {
-    public string BackendUrl { get; set; } = "http://localhost:8080";
+    public string BackendUrl { get; set; } = "http://localhost:3001";
     public string? JwtToken { get; set; }
     public uint? OrganisationId { get; set; }
 }

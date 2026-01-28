@@ -2,14 +2,13 @@
   "tally": {
     "server": "localhost",
     "port": 9000,
-    "company": "Onlyoncloud"
+    "company": ""
   },
   "sync": {
     "intervalMinutes": 15,
     "exportPath": "./exports"
   },
   "backend": {
-    "url": "http://localhost:8080/api/data",
-    "organisationId": 1
+    "url": "http://localhost:3001/api/data"
   }
 }

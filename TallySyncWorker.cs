@@ -9,15 +9,13 @@ public class TallySyncWorker : BackgroundService
     private readonly TallyConfig _config;
     private readonly int _intervalMinutes;
     private readonly string _backendUrl;
-    private readonly int _organisationId;
 
     public TallySyncWorker()
     {
-        var (tallyConfig, intervalMinutes, backendUrl, organisationId) = LoadConfiguration();
+        var (tallyConfig, intervalMinutes, backendUrl) = LoadConfiguration();
         _config = tallyConfig;
         _intervalMinutes = intervalMinutes;
         _backendUrl = backendUrl;
-        _organisationId = organisationId;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -104,9 +102,17 @@ public class TallySyncWorker : BackgroundService
             Console.WriteLine($"\n📡 Uploading to backend ({_backendUrl})...");
             Console.WriteLine("─────────────────────────────────────────────────");
 
+            // Get organisation ID from login (saved in ~/.tally_org)
+            var organisationId = AuthService.LoadOrganisationId();
+            if (!organisationId.HasValue)
+            {
+                Console.WriteLine("✗ No organization selected. Please run: dotnet run -- --login");
+                return;
+            }
+
             var uploadedCount = await uploadService.UploadMultipleCsvFilesAsync(
                 exportedFiles, 
-                _organisationId);
+                (int)organisationId.Value);
 
             Console.WriteLine("─────────────────────────────────────────────────");
             Console.WriteLine($"✓ Uploaded {uploadedCount}/{exportedFiles.Count} files successfully");
@@ -134,18 +140,17 @@ public class TallySyncWorker : BackgroundService
         }
     }
 
-    private (TallyConfig, int, string, int) LoadConfiguration()
+    private (TallyConfig, int, string) LoadConfiguration()
     {
         var configPath = "config.json";
         var tallyConfig = new TallyConfig();
         var intervalMinutes = 15;
-        var backendUrl = "http://localhost:8080/api/data";
-        var organisationId = 1;
+        var backendUrl = "http://localhost:3001/api/data";
         
         if (!File.Exists(configPath))
         {
             Console.WriteLine("⚠️  config.json not found, using defaults");
-            return (tallyConfig, intervalMinutes, backendUrl, organisationId);
+            return (tallyConfig, intervalMinutes, backendUrl);
         }
 
         try
@@ -186,18 +191,15 @@ public class TallySyncWorker : BackgroundService
                     
                     if (backend.TryGetProperty("url", out var url))
                         backendUrl = url.GetString() ?? backendUrl;
-                    
-                    if (backend.TryGetProperty("organisationId", out var orgId))
-                        organisationId = orgId.GetInt32();
                 }
             }
 
-            return (tallyConfig, intervalMinutes, backendUrl, organisationId);
+            return (tallyConfig, intervalMinutes, backendUrl);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"⚠️  Error loading config: {ex.Message}, using defaults");
-            return (tallyConfig, intervalMinutes, backendUrl, organisationId);
+            return (tallyConfig, intervalMinutes, backendUrl);
         }
     }
 }

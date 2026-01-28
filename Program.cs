@@ -13,7 +13,7 @@ if (args.Length > 0)
             return;
         
         case "--login":
-            var backendUrl = args.Length > 1 ? args[1] : "http://localhost:8080";
+            var backendUrl = args.Length > 1 ? args[1] : "http://localhost:3001";
             await LoginCommand.ExecuteAsync(backendUrl);
             return;
     }
